@@ -13,6 +13,7 @@ from langchain.schema import HumanMessage
 from vector_store import VectorStoreManager
 from embedding_generator import EmbeddingGenerator
 import re
+from error_handler import ErrorHandler, retry_with_exponential_backoff, log_function_call
 
 
 @dataclass
@@ -85,6 +86,12 @@ Correct Answer: [A/B/C/D]
 Generate {num_questions} questions now:"""
         )
     
+    @retry_with_exponential_backoff(
+        max_retries=3,
+        initial_delay=2.0,
+        exceptions=(Exception,)
+    )
+    @log_function_call()
     def generate_questions(
         self,
         num_questions: int,
@@ -107,11 +114,17 @@ Generate {num_questions} questions now:"""
         Raises:
             Exception: If question generation fails
         """
+        logger = ErrorHandler.get_logger()
+        
         try:
+            logger.info(f"Generating {num_questions} questions from namespace '{namespace}'")
+            
             # Generate query embedding
+            logger.debug("Generating query embedding")
             query_embedding = self.embedding_generator.generate_query_embedding(query)
             
             # Retrieve relevant context from vector store
+            logger.debug(f"Retrieving top {top_k} relevant chunks")
             relevant_chunks = self.vector_store.similarity_search(
                 query_embedding=query_embedding,
                 k=top_k,
@@ -119,10 +132,14 @@ Generate {num_questions} questions now:"""
             )
             
             if not relevant_chunks:
+                logger.error("No relevant content found in vector store")
                 raise Exception("No relevant content found in vector store")
+            
+            logger.info(f"Retrieved {len(relevant_chunks)} relevant chunks")
             
             # Combine chunk texts for context
             context = "\n\n".join([chunk.text for chunk in relevant_chunks])
+            logger.debug(f"Combined context length: {len(context)} characters")
             
             # Generate prompt
             prompt = self.prompt_template.format(
@@ -131,25 +148,36 @@ Generate {num_questions} questions now:"""
             )
             
             # Call LLM
+            logger.info("Calling LLM to generate questions")
             response = self.llm.invoke([HumanMessage(content=prompt)])
             raw_output = response.content
             
+            logger.debug(f"LLM response length: {len(raw_output)} characters")
+            
             # Parse questions from output
             questions = self._parse_questions(raw_output, context)
+            logger.info(f"Parsed {len(questions)} questions from LLM output")
             
             # Validate and filter questions
             valid_questions = []
             for question in questions:
                 if self.validate_question(question):
                     valid_questions.append(question)
+                else:
+                    logger.warning(f"Question failed validation: {question.question_text[:50]}...")
+            
+            logger.info(f"Validated {len(valid_questions)} questions")
             
             # If we don't have enough valid questions, raise an error
             if len(valid_questions) < num_questions:
-                print(f"Warning: Only generated {len(valid_questions)} valid questions out of {num_questions} requested")
+                logger.warning(
+                    f"Only generated {len(valid_questions)} valid questions out of {num_questions} requested"
+                )
             
             return valid_questions[:num_questions]
             
         except Exception as e:
+            logger.error(f"Failed to generate questions: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate questions: {str(e)}")
     
     def _parse_questions(self, raw_output: str, source_context: str) -> List[Question]:

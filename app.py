@@ -8,6 +8,7 @@ Provides a web interface for uploading PDFs and generating quiz questions.
 import streamlit as st
 from typing import Optional, List
 import traceback
+import logging
 
 # Import application modules
 from config import load_config, ConfigurationError
@@ -15,6 +16,7 @@ from pdf_processor import PDFProcessor, DocumentChunk
 from vector_store import VectorStoreManager
 from embedding_generator import EmbeddingGenerator
 from question_generator import QuestionGenerator, Question
+from error_handler import ErrorHandler, ErrorType
 
 
 # Page configuration
@@ -270,6 +272,15 @@ def validate_question_count(num_questions: int, min_val: int, max_val: int) -> b
 
 def main():
     """Main application function."""
+    # Initialize logging
+    ErrorHandler.setup_logging(
+        log_level=logging.INFO,
+        log_file="quiz_generator.log"
+    )
+    
+    logger = ErrorHandler.get_logger()
+    logger.info("Starting Quiz Generator application")
+    
     # Initialize session state
     initialize_session_state()
     
@@ -281,17 +292,14 @@ def main():
         if st.session_state.config is None:
             with st.spinner("Loading configuration..."):
                 st.session_state.config = load_config()
+                logger.info("Configuration loaded successfully")
     except ConfigurationError as e:
-        display_error(
-            "Configuration Error",
-            f"{str(e)}\n\nPlease ensure all required environment variables are set in your .env file."
-        )
+        user_msg, tech_details = ErrorHandler.handle_configuration_error(e)
+        display_error(user_msg, tech_details)
         st.stop()
     except Exception as e:
-        display_error(
-            "Unexpected configuration error",
-            f"{str(e)}\n\n{traceback.format_exc()}"
-        )
+        user_msg, tech_details = ErrorHandler.handle_generic_error(e)
+        display_error(user_msg, tech_details)
         st.stop()
     
     config = st.session_state.config
@@ -332,6 +340,8 @@ def main():
         
         # Process PDF and generate questions
         try:
+            logger.info(f"Starting question generation for file: {uploaded_file.name}")
+            
             # Show progress
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -407,18 +417,30 @@ def main():
             status_text.text("✨ Questions generated successfully!")
             
             display_success(f"Generated {len(questions)} quiz questions!")
+            logger.info(f"Successfully generated {len(questions)} questions")
             
         except ValueError as e:
-            display_error("PDF Processing Error", str(e))
+            # PDF processing errors
+            user_msg, tech_details = ErrorHandler.handle_pdf_error(e)
+            display_error(user_msg, tech_details)
             st.session_state.error_message = str(e)
         except ConfigurationError as e:
-            display_error("Configuration Error", str(e))
+            # Configuration errors
+            user_msg, tech_details = ErrorHandler.handle_configuration_error(e)
+            display_error(user_msg, tech_details)
             st.session_state.error_message = str(e)
         except Exception as e:
-            display_error(
-                "An unexpected error occurred",
-                f"{str(e)}\n\n{traceback.format_exc()}"
-            )
+            # Determine error type and handle appropriately
+            error_str = str(e).lower()
+            
+            if "pinecone" in error_str or "vector" in error_str or "index" in error_str:
+                user_msg, tech_details = ErrorHandler.handle_vector_store_error(e)
+            elif "openai" in error_str or "llm" in error_str or "generate" in error_str:
+                user_msg, tech_details = ErrorHandler.handle_generation_error(e)
+            else:
+                user_msg, tech_details = ErrorHandler.handle_generic_error(e)
+            
+            display_error(user_msg, tech_details)
             st.session_state.error_message = str(e)
     
     # Display generated questions

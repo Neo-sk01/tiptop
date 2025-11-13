@@ -8,6 +8,7 @@ using LangChain's OpenAI embeddings.
 from typing import List
 from langchain_openai import OpenAIEmbeddings
 from pdf_processor import DocumentChunk
+from error_handler import ErrorHandler, retry_with_exponential_backoff, log_function_call
 
 
 class EmbeddingGenerator:
@@ -27,6 +28,8 @@ class EmbeddingGenerator:
             model=model_name
         )
     
+    @retry_with_exponential_backoff(max_retries=3, initial_delay=2.0)
+    @log_function_call()
     def generate_embeddings(self, chunks: List[DocumentChunk]) -> List[DocumentChunk]:
         """
         Generate embeddings for a list of document chunks.
@@ -40,25 +43,36 @@ class EmbeddingGenerator:
         Raises:
             Exception: If embedding generation fails
         """
+        logger = ErrorHandler.get_logger()
+        
         if not chunks:
+            logger.warning("No chunks provided for embedding generation")
             return []
         
         try:
+            logger.info(f"Generating embeddings for {len(chunks)} chunks")
+            
             # Extract text from chunks
             texts = [chunk.text for chunk in chunks]
             
             # Generate embeddings in batch
             embeddings = self.embeddings.embed_documents(texts)
             
+            logger.debug(f"Generated {len(embeddings)} embeddings")
+            
             # Attach embeddings to chunks
             for chunk, embedding in zip(chunks, embeddings):
                 chunk.embedding = embedding
             
+            logger.info(f"Successfully generated embeddings for {len(chunks)} chunks")
             return chunks
             
         except Exception as e:
+            logger.error(f"Failed to generate embeddings: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate embeddings: {str(e)}")
     
+    @retry_with_exponential_backoff(max_retries=3, initial_delay=2.0)
+    @log_function_call()
     def generate_query_embedding(self, query: str) -> List[float]:
         """
         Generate an embedding for a query string.
@@ -72,7 +86,13 @@ class EmbeddingGenerator:
         Raises:
             Exception: If embedding generation fails
         """
+        logger = ErrorHandler.get_logger()
+        
         try:
-            return self.embeddings.embed_query(query)
+            logger.debug(f"Generating query embedding for: {query[:50]}...")
+            embedding = self.embeddings.embed_query(query)
+            logger.debug(f"Generated query embedding with dimension {len(embedding)}")
+            return embedding
         except Exception as e:
+            logger.error(f"Failed to generate query embedding: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate query embedding: {str(e)}")

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 import PyPDF2
 from io import BytesIO
+from error_handler import ErrorHandler, log_function_call
 
 
 @dataclass
@@ -34,6 +35,7 @@ class PDFProcessor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
+    @log_function_call()
     def extract_text(self, pdf_file) -> str:
         """
         Extract text content from a PDF file.
@@ -48,6 +50,8 @@ class PDFProcessor:
             ValueError: If the PDF is invalid or cannot be read
             Exception: For other PDF processing errors
         """
+        logger = ErrorHandler.get_logger()
+        
         try:
             # Reset file pointer to beginning
             pdf_file.seek(0)
@@ -57,7 +61,10 @@ class PDFProcessor:
             
             # Check if PDF has pages
             if len(pdf_reader.pages) == 0:
+                logger.error("PDF file contains no pages")
                 raise ValueError("PDF file contains no pages")
+            
+            logger.info(f"Extracting text from PDF with {len(pdf_reader.pages)} pages")
             
             # Extract text from all pages
             text_content = []
@@ -70,15 +77,20 @@ class PDFProcessor:
             full_text = "\n".join(text_content)
             
             if not full_text.strip():
+                logger.error("No text content could be extracted from the PDF")
                 raise ValueError("No text content could be extracted from the PDF")
             
+            logger.info(f"Successfully extracted {len(full_text)} characters from PDF")
             return full_text
             
         except PyPDF2.errors.PdfReadError as e:
+            logger.error(f"PDF read error: {str(e)}", exc_info=True)
             raise ValueError(f"Invalid or corrupted PDF file: {str(e)}")
         except Exception as e:
+            logger.error(f"Error processing PDF: {str(e)}", exc_info=True)
             raise Exception(f"Error processing PDF: {str(e)}")
 
+    @log_function_call()
     def chunk_text(self, text: str, document_name: str = "document") -> List[DocumentChunk]:
         """
         Split text into overlapping chunks for processing.
@@ -90,8 +102,13 @@ class PDFProcessor:
         Returns:
             List of DocumentChunk objects with text and metadata
         """
+        logger = ErrorHandler.get_logger()
+        
         if not text or not text.strip():
+            logger.warning("Empty text provided for chunking")
             return []
+        
+        logger.info(f"Chunking text of length {len(text)} with chunk_size={self.chunk_size}, overlap={self.chunk_overlap}")
         
         chunks = []
         start = 0
@@ -123,6 +140,7 @@ class PDFProcessor:
             start = end - self.chunk_overlap
             chunk_index += 1
         
+        logger.info(f"Created {len(chunks)} chunks from text")
         return chunks
     
     def extract_metadata(self, pdf_file) -> Dict[str, Any]:
