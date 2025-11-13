@@ -7,7 +7,7 @@ for the Quiz Generator application.
 
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
-import PyPDF2
+import pypdf as PyPDF2
 from io import BytesIO
 from error_handler import ErrorHandler, log_function_call
 

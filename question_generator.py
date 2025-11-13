@@ -8,8 +8,8 @@ using LangChain and OpenAI LLMs.
 from dataclasses import dataclass
 from typing import List, Optional
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.schema import HumanMessage
+from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage
 from vector_store import VectorStoreManager
 from embedding_generator import EmbeddingGenerator
 import re
